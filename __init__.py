@@ -1,19 +1,20 @@
 """
 ComfyUI API Manager
 
-A comprehensive API manager for ComfyUI with:
-- Full ComfyUI API integration (REST + WebSocket)
+A server-side plugin for ComfyUI that provides:
+- REST API endpoints for workflow management and execution
+- Workflow analysis to detect inputs (images, text, numbers)
 - MCP (Model Context Protocol) server for AI integration
-- Workflow management and execution
 - Job tracking with history
-- Multiple connection support
-- Robust error handling
+- Settings panel in ComfyUI UI
+
+This is a server-only plugin - no workflow nodes are added.
+All functionality is exposed via API endpoints.
 
 Version: 2.0.0
 """
 
 import logging
-import sys
 from pathlib import Path
 
 __version__ = "2.0.0"
@@ -27,237 +28,107 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# Import all node classes
+# Server-Only Plugin - No Node Mappings
 # ============================================================================
 
-# API Request nodes
-from .api_request import APIRequestNode, APIRequestNodeSimple
-
-# Image handling nodes
-from .image_post_node import PostImageToAPI, DownloadImageFromURL
-
-# Text and JSON processing nodes
-from .text_prompt_combiner_node import (
-    TextPromptCombinerNode,
-    TextTemplateNode,
-    JSONExtractNode
-)
-from .json_array_iterator import (
-    JSONArrayIteratorNode,
-    JSONArrayFilterNode,
-    JSONArraySliceNode,
-    JSONArrayMapNode,
-    JSONArrayStatsNode,
-    JSONMergeNode
-)
-
-# ComfyUI integration nodes
-from .comfyui_nodes import (
-    ComfyUIExecuteWorkflowNode,
-    ComfyUIQueueStatusNode,
-    ComfyUISystemInfoNode,
-    ComfyUIListModelsNode,
-    ComfyUIUploadImageNode,
-    ComfyUIDownloadImageNode,
-    ComfyUIInterruptNode,
-    ComfyUIFreeMemoryNode,
-    ComfyUIListWorkflowsNode
-)
-
-# Settings and management nodes
-from .settings_nodes import (
-    APIManagerSettingsNode,
-    ConnectionManagerNode,
-    JobHistoryNode,
-    JobStatisticsNode,
-    ClearJobHistoryNode,
-    MCPServerControlNode,
-    LoggingSettingsNode,
-    ViewRecentJobsNode
-)
+# Empty mappings - this plugin adds no workflow nodes
+NODE_CLASS_MAPPINGS = {}
+NODE_DISPLAY_NAME_MAPPINGS = {}
 
 # ============================================================================
-# Node Registration
+# Web Directory (for ComfyUI settings panel extension)
 # ============================================================================
 
-NODE_CLASS_MAPPINGS = {
-    # API Request Nodes
-    "APIRequestNode": APIRequestNode,
-    "APIRequestNodeSimple": APIRequestNodeSimple,
+WEB_DIRECTORY = "./web"
 
-    # Image Nodes
-    "PostImageToAPI": PostImageToAPI,
-    "DownloadImageFromURL": DownloadImageFromURL,
+# ============================================================================
+# Server Route Registration
+# ============================================================================
 
-    # Text/JSON Processing Nodes
-    "TextPromptCombinerNode": TextPromptCombinerNode,
-    "TextTemplateNode": TextTemplateNode,
-    "JSONExtractNode": JSONExtractNode,
-    "JSONArrayIteratorNode": JSONArrayIteratorNode,
-    "JSONArrayFilterNode": JSONArrayFilterNode,
-    "JSONArraySliceNode": JSONArraySliceNode,
-    "JSONArrayMapNode": JSONArrayMapNode,
-    "JSONArrayStatsNode": JSONArrayStatsNode,
-    "JSONMergeNode": JSONMergeNode,
+def _register_api_routes():
+    """Register API routes with ComfyUI's PromptServer."""
+    try:
+        from server import PromptServer
+        from .api_routes import register_routes
 
-    # ComfyUI Integration Nodes
-    "ComfyUIExecuteWorkflow": ComfyUIExecuteWorkflowNode,
-    "ComfyUIQueueStatus": ComfyUIQueueStatusNode,
-    "ComfyUISystemInfo": ComfyUISystemInfoNode,
-    "ComfyUIListModels": ComfyUIListModelsNode,
-    "ComfyUIUploadImage": ComfyUIUploadImageNode,
-    "ComfyUIDownloadImage": ComfyUIDownloadImageNode,
-    "ComfyUIInterrupt": ComfyUIInterruptNode,
-    "ComfyUIFreeMemory": ComfyUIFreeMemoryNode,
-    "ComfyUIListWorkflows": ComfyUIListWorkflowsNode,
+        server = PromptServer.instance
+        register_routes(server)
+        logger.info("API Manager routes registered successfully")
+        return True
 
-    # Settings Nodes
-    "APIManagerSettings": APIManagerSettingsNode,
-    "ConnectionManager": ConnectionManagerNode,
-    "JobHistory": JobHistoryNode,
-    "JobStatistics": JobStatisticsNode,
-    "ClearJobHistory": ClearJobHistoryNode,
-    "MCPServerControl": MCPServerControlNode,
-    "LoggingSettings": LoggingSettingsNode,
-    "ViewRecentJobs": ViewRecentJobsNode,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    # API Request Nodes
-    "APIRequestNode": "API Request",
-    "APIRequestNodeSimple": "Simple API Request",
-
-    # Image Nodes
-    "PostImageToAPI": "Post Image to API",
-    "DownloadImageFromURL": "Download Image from URL",
-
-    # Text/JSON Processing Nodes
-    "TextPromptCombinerNode": "Text Prompt Combiner",
-    "TextTemplateNode": "Text Template",
-    "JSONExtractNode": "JSON Extract",
-    "JSONArrayIteratorNode": "JSON Array Iterator",
-    "JSONArrayFilterNode": "JSON Array Filter",
-    "JSONArraySliceNode": "JSON Array Slice",
-    "JSONArrayMapNode": "JSON Array Map",
-    "JSONArrayStatsNode": "JSON Array Stats",
-    "JSONMergeNode": "JSON Merge",
-
-    # ComfyUI Integration Nodes
-    "ComfyUIExecuteWorkflow": "Execute Workflow (ComfyUI)",
-    "ComfyUIQueueStatus": "Queue Status (ComfyUI)",
-    "ComfyUISystemInfo": "System Info (ComfyUI)",
-    "ComfyUIListModels": "List Models (ComfyUI)",
-    "ComfyUIUploadImage": "Upload Image (ComfyUI)",
-    "ComfyUIDownloadImage": "Download Image (ComfyUI)",
-    "ComfyUIInterrupt": "Interrupt (ComfyUI)",
-    "ComfyUIFreeMemory": "Free Memory (ComfyUI)",
-    "ComfyUIListWorkflows": "List Workflows (ComfyUI)",
-
-    # Settings Nodes
-    "APIManagerSettings": "API Manager Settings",
-    "ConnectionManager": "Connection Manager",
-    "JobHistory": "Job History",
-    "JobStatistics": "Job Statistics",
-    "ClearJobHistory": "Clear Job History",
-    "MCPServerControl": "MCP Server Control",
-    "LoggingSettings": "Logging Settings",
-    "ViewRecentJobs": "View Recent Jobs",
-}
+    except ImportError as e:
+        logger.warning(f"Could not import PromptServer: {e}")
+        logger.info("API routes will not be available (running outside ComfyUI?)")
+        return False
+    except Exception as e:
+        logger.error(f"Error registering API routes: {e}")
+        return False
 
 # ============================================================================
 # MCP Server Initialization
 # ============================================================================
 
 def _initialize_mcp_server():
-    """Initialize MCP server if enabled in settings."""
+    """Check MCP server status from settings."""
     try:
         from .settings_manager import get_settings_manager
-        from .mcp_server import create_mcp_server, MCP_AVAILABLE
+        from .mcp_server import MCP_AVAILABLE
 
         if not MCP_AVAILABLE:
-            logger.info("MCP SDK not installed. MCP server disabled.")
+            logger.info("MCP SDK not installed. Install with: pip install mcp")
             return None
 
         settings = get_settings_manager()
 
         if settings.is_mcp_enabled():
-            logger.info("MCP server is enabled in settings")
-            # Note: Actual server startup is handled separately
-            # This just validates the configuration
+            logger.info(f"MCP server enabled on port {settings.settings.get('mcp', {}).get('port', 8765)}")
+            logger.info("MCP server can be started via API: POST /api-manager/mcp/start")
             return True
         else:
-            logger.info("MCP server is disabled in settings. Enable via settings node.")
+            logger.info("MCP server disabled. Enable in ComfyUI Settings > API Manager")
             return False
 
     except ImportError as e:
         logger.debug(f"MCP initialization skipped: {e}")
         return None
     except Exception as e:
-        logger.warning(f"Error initializing MCP server: {e}")
+        logger.warning(f"Error checking MCP settings: {e}")
         return None
 
+# ============================================================================
+# Plugin Initialization
+# ============================================================================
+
+def _initialize_plugin():
+    """Initialize the API Manager plugin."""
+    logger.info(f"ComfyUI API Manager v{__version__} initializing...")
+
+    # Register API routes with ComfyUI server
+    routes_registered = _register_api_routes()
+
+    # Check MCP server status
+    mcp_status = _initialize_mcp_server()
+
+    # Log initialization summary
+    if routes_registered:
+        logger.info("API Manager initialized successfully")
+        logger.info("API endpoints available at /api-manager/*")
+        logger.info("Settings available in ComfyUI Settings panel")
+    else:
+        logger.warning("API Manager partially initialized (routes not registered)")
+
+    return routes_registered
 
 # Initialize on module load
-_mcp_status = _initialize_mcp_server()
+_plugin_initialized = _initialize_plugin()
 
 # ============================================================================
-# Web Directory (for ComfyUI web extensions)
-# ============================================================================
-
-WEB_DIRECTORY = "./web"
-
-# ============================================================================
-# Export all
+# Export
 # ============================================================================
 
 __all__ = [
-    # Version info
     "__version__",
-
-    # Node mappings
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
     "WEB_DIRECTORY",
-
-    # Node classes - API
-    "APIRequestNode",
-    "APIRequestNodeSimple",
-
-    # Node classes - Image
-    "PostImageToAPI",
-    "DownloadImageFromURL",
-
-    # Node classes - Text/JSON
-    "TextPromptCombinerNode",
-    "TextTemplateNode",
-    "JSONExtractNode",
-    "JSONArrayIteratorNode",
-    "JSONArrayFilterNode",
-    "JSONArraySliceNode",
-    "JSONArrayMapNode",
-    "JSONArrayStatsNode",
-    "JSONMergeNode",
-
-    # Node classes - ComfyUI
-    "ComfyUIExecuteWorkflowNode",
-    "ComfyUIQueueStatusNode",
-    "ComfyUISystemInfoNode",
-    "ComfyUIListModelsNode",
-    "ComfyUIUploadImageNode",
-    "ComfyUIDownloadImageNode",
-    "ComfyUIInterruptNode",
-    "ComfyUIFreeMemoryNode",
-    "ComfyUIListWorkflowsNode",
-
-    # Node classes - Settings
-    "APIManagerSettingsNode",
-    "ConnectionManagerNode",
-    "JobHistoryNode",
-    "JobStatisticsNode",
-    "ClearJobHistoryNode",
-    "MCPServerControlNode",
-    "LoggingSettingsNode",
-    "ViewRecentJobsNode",
 ]
-
-logger.info(f"ComfyUI API Manager v{__version__} loaded - {len(NODE_CLASS_MAPPINGS)} nodes registered")

@@ -26,6 +26,48 @@ from PIL import Image
 
 logger = logging.getLogger("comfyui_api_manager")
 
+
+def find_workflow_path(name: str) -> Optional[Path]:
+    """
+    Find a workflow file by name, checking multiple locations.
+
+    ComfyUI stores workflows in user/default/workflows/ (new)
+    or user/workflows/ (legacy).
+
+    Returns the Path if found, None otherwise.
+    """
+    try:
+        import folder_paths
+        user_dir = folder_paths.get_user_directory()
+
+        # Possible workflow directories
+        possible_dirs = [
+            Path(user_dir) / "default" / "workflows",  # New ComfyUI location
+            Path(user_dir) / "workflows",               # Legacy location
+        ]
+
+        # Try each directory
+        for workflows_dir in possible_dirs:
+            if not workflows_dir.exists():
+                continue
+
+            # Try exact name with .json extension
+            workflow_path = workflows_dir / f"{name}.json"
+            if workflow_path.exists():
+                return workflow_path
+
+            # Try without extension (in case name already has .json)
+            if name.endswith(".json"):
+                workflow_path = workflows_dir / name
+                if workflow_path.exists():
+                    return workflow_path
+
+        return None
+    except Exception as e:
+        logger.error(f"Error finding workflow {name}: {e}")
+        return None
+
+
 # Global state
 _plugin_settings = None
 _job_tracker = None
@@ -242,12 +284,28 @@ def register_routes(server):
     @routes.get("/api-manager/info")
     async def get_info(request):
         """Get API Manager plugin information."""
+        import folder_paths
+
         settings = get_plugin_settings()
+        user_dir = folder_paths.get_user_directory()
+
+        # Show workflow directories being searched
+        workflow_dirs = []
+        for subdir in ["default/workflows", "workflows"]:
+            path = Path(user_dir) / subdir
+            workflow_dirs.append({
+                "path": str(path),
+                "exists": path.exists(),
+                "files": len(list(path.glob("*.json"))) if path.exists() else 0
+            })
+
         return web.json_response({
             "name": "ComfyUI API Manager",
             "version": "2.0.0",
             "mcp_enabled": settings.is_mcp_enabled(),
             "mcp_port": settings.get_mcp_settings().port if settings.is_mcp_enabled() else None,
+            "user_directory": str(user_dir),
+            "workflow_directories": workflow_dirs,
             "endpoints": [
                 "/api-manager/info",
                 "/api-manager/settings",
@@ -324,22 +382,30 @@ def register_routes(server):
             workflows = []
 
             # Get user workflows
+            # ComfyUI stores workflows in user/default/workflows/
             user_dir = folder_paths.get_user_directory()
-            workflows_dir = Path(user_dir) / "workflows"
 
-            if workflows_dir.exists():
-                for file in workflows_dir.glob("*.json"):
-                    try:
-                        stat = file.stat()
-                        workflows.append({
-                            "name": file.stem,
-                            "path": str(file),
-                            "source": "user",
-                            "size": stat.st_size,
-                            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
-                        })
-                    except Exception as e:
-                        logger.warning(f"Error reading workflow {file}: {e}")
+            # Check multiple possible locations
+            possible_dirs = [
+                Path(user_dir) / "default" / "workflows",  # New ComfyUI location
+                Path(user_dir) / "workflows",               # Legacy location
+            ]
+
+            for workflows_dir in possible_dirs:
+                if workflows_dir.exists():
+                    logger.debug(f"Scanning workflows in: {workflows_dir}")
+                    for file in workflows_dir.glob("*.json"):
+                        try:
+                            stat = file.stat()
+                            workflows.append({
+                                "name": file.stem,
+                                "path": str(file),
+                                "source": "user",
+                                "size": stat.st_size,
+                                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                            })
+                        except Exception as e:
+                            logger.warning(f"Error reading workflow {file}: {e}")
 
             # Get default workflows
             default_dir = Path(folder_paths.base_path) / "web" / "scripts" / "defaultWorkflows"
@@ -369,25 +435,11 @@ def register_routes(server):
     async def get_workflow(request):
         """Get a specific workflow by name."""
         try:
-            import folder_paths
-
             name = request.match_info["name"]
 
-            # Search for workflow
-            user_dir = folder_paths.get_user_directory()
-            workflows_dir = Path(user_dir) / "workflows"
-
-            # Try exact match first
-            workflow_path = workflows_dir / f"{name}.json"
-            if not workflow_path.exists():
-                # Try with different extensions
-                for ext in ["", ".json"]:
-                    test_path = workflows_dir / f"{name}{ext}"
-                    if test_path.exists():
-                        workflow_path = test_path
-                        break
-
-            if not workflow_path.exists():
+            # Find workflow using helper
+            workflow_path = find_workflow_path(name)
+            if not workflow_path:
                 return web.json_response(
                     {"success": False, "error": f"Workflow not found: {name}"},
                     status=404
@@ -399,6 +451,7 @@ def register_routes(server):
             return web.json_response({
                 "success": True,
                 "name": name,
+                "path": str(workflow_path),
                 "workflow": workflow
             })
 
@@ -417,15 +470,11 @@ def register_routes(server):
         - Input types and current values
         """
         try:
-            import folder_paths
-
             name = request.match_info["name"]
 
-            # Load workflow
-            user_dir = folder_paths.get_user_directory()
-            workflow_path = Path(user_dir) / "workflows" / f"{name}.json"
-
-            if not workflow_path.exists():
+            # Find workflow using helper
+            workflow_path = find_workflow_path(name)
+            if not workflow_path:
                 return web.json_response(
                     {"success": False, "error": f"Workflow not found: {name}"},
                     status=404
@@ -499,17 +548,14 @@ def register_routes(server):
         - timeout: Execution timeout in seconds (default: 300)
         """
         try:
-            import folder_paths
             import execution
 
             name = request.match_info["name"]
             data = await request.json()
 
-            # Load workflow
-            user_dir = folder_paths.get_user_directory()
-            workflow_path = Path(user_dir) / "workflows" / f"{name}.json"
-
-            if not workflow_path.exists():
+            # Find workflow using helper
+            workflow_path = find_workflow_path(name)
+            if not workflow_path:
                 return web.json_response(
                     {"success": False, "error": f"Workflow not found: {name}"},
                     status=404
